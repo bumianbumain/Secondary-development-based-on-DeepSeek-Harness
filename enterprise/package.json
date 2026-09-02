@@ -1,0 +1,9 @@
+{
+  "name": "@my-company/enterprise-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "企业级 AI 智能体中间件平台私有扩展层（Bundle / Patch / Profile）",
+  "scripts": {
+    "sync": "bash scripts/sync-upstream.sh"
+  }
+}

@@ -1,0 +1,21 @@
+# 企业主 Profile —— 在 web profile（dsh-base + dsh-web-app）之上叠加私有层。
+# 用法：dsh web --patch enterprise/profiles/enterprise.cordis.yml
+# 本文件是 PATCH OVERLAY，不是完整插件树；`- id:` 覆盖某行 config，`- insert:` 追加插件。
+
+# 把私有业务 Bundle 插入插件树
+- insert:
+    - id: biz-order
+      name: '@my-company/biz-order'
+
+# 覆盖 webserver 监听地址（示例：允许局域网访问）
+- id: webserver
+  config:
+    host: 0.0.0.0
+    port: 3080
+
+# 注入企业系统提示词（覆盖 base 的 persona 行）
+- id: system-prompt
+  config:
+    persona: >-
+      你是企业 AI 助手，遵循内部合规与多租户隔离规范。涉及用户数据时必须
+      通过会话上下文获取身份，禁止假设或硬编码。

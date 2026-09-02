@@ -1,0 +1,6 @@
+# biz-order Bundle 的 patch 层：在 base + web-app 两个 bundle 层之后插入本 Bundle 自身的插件行。
+# Loader 据此把 @my-company/biz-order 作为 Cordis 插件加载，其 apply() 中注册 query_user_orders 工具。
+# 一条 insert 即可叠加业务插件；后续业务 Bundle（biz-user、biz-knowledge）照此追加。
+- insert:
+  - id: biz-order
+    name: '@my-company/biz-order'

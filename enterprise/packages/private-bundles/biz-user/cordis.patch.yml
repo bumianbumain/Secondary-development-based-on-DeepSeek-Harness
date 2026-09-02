@@ -1,0 +1,6 @@
+# biz-user Bundle 的 patch 层：在 base + web-app + biz-order 之后插入本 Bundle 自身的插件行。
+# Loader 据此把 @my-company/biz-user 作为 Cordis 插件加载，其 apply() 中注册 query_user_profile 等工具。
+# 一条 insert 即可叠加业务插件；后续业务 Bundle 照此追加到 profile 的 bundles 列表即可。
+- insert:
+  - id: biz-user
+    name: '@my-company/biz-user'

@@ -1,0 +1,9 @@
+# 基础行为覆盖层：在 Profile 之前或之后通过 --patch 叠加。
+# 示例：关闭 HMR（生产环境）、强制模型供应商为内部网关。
+
+- id: hmr
+  disabled: true
+
+# - id: llm
+#   config:
+#     provider: internal-gateway   # 指向你的内部 LLM 网关

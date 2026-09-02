@@ -1,0 +1,4 @@
+# biz-invoice Bundle 的 patch 层：在 base + web-app + 已有业务 Bundle 之后插入本插件行。
+- insert:
+  - id: biz-invoice
+    name: '@my-company/biz-invoice'

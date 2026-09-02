@@ -7,6 +7,8 @@ packages:
   - native/landlock-run/packages/*
   # Product assemblies over the package tier; apps/cli owns the `dsh` bin.
   - apps/*
+  # 企业私有扩展层（基于 DSH 的二次开发）：私有 Bundle/Patch，不修改核心源码。
+  - enterprise/packages/*/*
   - website
   # Deploy root of the single-exe build: a pure dependency manifest whose
   # closure is what the exe bundles and what the Python runtime distributes.

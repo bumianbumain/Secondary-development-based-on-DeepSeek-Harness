@@ -1,0 +1,11 @@
+# 开发环境模型配置（供 base-override 或环境变量引用）
+models:
+  default: deepseek-chat
+  providers:
+    deepseek:
+      apiKey: ${DEEPSEEK_API_KEY}
+      baseURL: https://api.deepseek.com
+    # 内部网关示例（企业接入点）
+    internal-gateway:
+      apiKey: ${INTERNAL_LLM_API_KEY}
+      baseURL: https://llm.internal.example.com/v1
