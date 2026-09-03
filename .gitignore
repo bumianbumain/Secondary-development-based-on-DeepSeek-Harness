@@ -41,3 +41,14 @@ apps/web/dist/
 worktrees/
 .agents/worktrees/
 .typert-*/
+
+# —— 二次开发本地瞬态产物（勿提交；历史误提交项已取消跟踪）——
+.vs/
+_tmp_*
+.dsh-sdk-*/
+dsh-web-*.log
+db-board.log
+**/.generated-*/
+**/.explicit-service-*/
+**/.rendered-model-*/
+scripts/staged-lint-probe-*.ts
