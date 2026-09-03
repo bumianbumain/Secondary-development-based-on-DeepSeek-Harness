@@ -27,5 +27,6 @@ export interface KnowledgeDataSource {
   searchDocs(tenant: string, filter?: KnowledgeFilter, limit?: number): Promise<KnowledgeDoc[]>
   getDoc(tenant: string, docId: string): Promise<KnowledgeDoc | null>
   listCategories(): readonly KnowledgeCategory[]
-  listTags(tenant: string): readonly string[]
+  /** 列出当前租户知识库中出现的全部标签（去重）。 */
+  listTags(tenant: string): Promise<readonly string[]>
 }

@@ -1,0 +1,21 @@
+# 多环境公共部署层 —— 与 dev/staging/prod 无关的插件行调参。
+#
+# 装载顺序（dsh 组合模型，后加载者优先）：
+#   bundle patch（每个 Bundle 自带 cordis.patch.yml，按 dsh.profile.bundles 序）
+#   → profile 自身 cordis.patch.yml（$DSH_HOME/profiles/enterprise/）
+#   → home 级 cordis.patch.yml（$DSH_HOME/）
+#   → --patch common.cordis.yml（本文件）
+#   → --patch <env>.cordis.yml（环境差异层，由 run-web-env.sh 组装）
+#
+# 注意：patch 按 id 定位、整体替换该行 config（不做深度合并），
+# 因此覆盖某行时必须重述要保留的字段，或省略字段交给插件 Config 默认值兜底。
+#
+# 本文件只放「每个环境都要一致」的覆盖：
+#   · 企业 persona（身份叙事）——行为规则由 system-prompt-hook 立（见各环境层）
+
+# 覆盖 base 的 system-prompt persona 行（企业身份叙事）
+- id: system-prompt
+  config:
+    persona: >-
+      你是企业 AI 助手，遵循内部合规与多租户隔离规范。涉及用户数据时必须
+      通过会话上下文获取身份，禁止假设或硬编码。

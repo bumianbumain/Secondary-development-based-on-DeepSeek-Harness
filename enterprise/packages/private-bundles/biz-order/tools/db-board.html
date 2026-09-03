@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>DSH 数据库看板 · 只读</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --border: #e3e6ea; --text: #1f2328;
+    --muted: #6b7280; --accent: #2563eb; --accent-soft: #eff4ff;
+    --head: #f2f4f7; --ok: #15803d; --err: #b91c1c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16181d; --panel: #1d2026; --border: #2c3038; --text: #e6e8eb;
+      --muted: #9aa1ac; --accent: #60a5fa; --accent-soft: #1e2a3d;
+      --head: #23262d; --ok: #4ade80; --err: #f87171;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px; padding: 12px 18px;
+    background: var(--panel); border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  .tag {
+    font-size: 12px; color: var(--muted); background: var(--head);
+    border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px;
+  }
+  .tag.readonly { color: var(--ok); border-color: var(--ok); }
+  .spacer { flex: 1; }
+  button {
+    font: inherit; cursor: pointer; border-radius: 6px; padding: 5px 12px;
+    border: 1px solid var(--border); background: var(--panel); color: var(--text);
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover { opacity: .9; color: #fff; }
+  main { display: flex; gap: 0; height: calc(100vh - 53px); }
+  aside {
+    width: 250px; flex: none; background: var(--panel);
+    border-right: 1px solid var(--border); overflow: auto; padding: 8px 0;
+  }
+  aside .grp { padding: 6px 14px; font-size: 12px; color: var(--muted); }
+  aside .item {
+    padding: 7px 14px; cursor: pointer; display: flex; justify-content: space-between;
+    gap: 8px; border-left: 2px solid transparent;
+  }
+  aside .item:hover { background: var(--head); }
+  aside .item.active { background: var(--accent-soft); border-left-color: var(--accent); color: var(--accent); }
+  aside .item .n { color: var(--muted); font-size: 12px; }
+  aside .item.active .n { color: var(--accent); }
+  section { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .bar {
+    display: flex; gap: 8px; align-items: center; padding: 10px 16px;
+    border-bottom: 1px solid var(--border); background: var(--panel);
+  }
+  .tabs button { border: 0; background: none; padding: 4px 10px; color: var(--muted); }
+  .tabs button.on { color: var(--accent); font-weight: 600; }
+  .sqlbox { flex: 1; padding: 12px 16px; overflow: auto; }
+  .sqlbar { display: flex; gap: 8px; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--border); }
+  textarea {
+    flex: 1; height: 52px; resize: vertical; font-family: ui-monospace, Consolas, monospace;
+    font-size: 13px; padding: 8px; border-radius: 6px; color: var(--text);
+    background: var(--bg); border: 1px solid var(--border);
+  }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { padding: 7px 12px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
+  th { background: var(--head); position: sticky; top: 0; font-weight: 600; z-index: 1; }
+  tbody tr:hover { background: var(--accent-soft); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.null { color: var(--muted); font-style: italic; }
+  .msg { padding: 14px 16px; border-radius: 6px; margin: 12px 16px; }
+  .msg.err { background: rgba(185,28,28,.08); color: var(--err); border: 1px solid rgba(185,28,28,.3); }
+  .msg.info { color: var(--muted); }
+  .meta { padding: 8px 16px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--border); background: var(--panel); }
+</style>
+</head>
+<body>
+<header>
+  <h1>DSH 数据库看板</h1>
+  <span class="tag" id="conn">连接中…</span>
+  <span class="tag readonly">只读</span>
+  <div class="spacer"></div>
+  <button onclick="loadTables()">刷新</button>
+</header>
+
+<main>
+  <aside id="tables"><div class="grp">加载中…</div></aside>
+  <section>
+    <div class="tabs bar">
+      <button class="on" data-tab="data" onclick="switchTab('data')">数据</button>
+      <button data-tab="schema" onclick="switchTab('schema')">表结构</button>
+      <div class="spacer"></div>
+      <span id="curTable" style="color:var(--muted);font-size:12px"></span>
+    </div>
+
+    <div class="sqlbar" id="sqlBar" style="display:none">
+      <textarea id="sql" placeholder="SELECT * FROM dbo.biz_orders WHERE tenant = 'demo'"></textarea>
+      <button class="primary" onclick="runSql()">执行</button>
+    </div>
+
+    <div class="sqlbox" id="box"></div>
+    <div class="meta" id="meta"></div>
+  </section>
+</main>
+
+<script>
+let state = { table: null, tab: 'data' }
+
+async function api(url, opts) {
+  const r = await fetch(url, opts)
+  return r.json()
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]))
+}
+
+function render(rows, metaText) {
+  const box = document.getElementById('box')
+  if (!rows || !rows.length) {
+    box.innerHTML = `<div class="msg info">${metaText || '（无数据）'}</div>`
+    return
+  }
+  const cols = Object.keys(rows[0])
+  const head = cols.map(c => `<th>${esc(c)}</th>`).join('')
+  const body = rows.map(r => '<tr>' + cols.map(c => {
+    const v = r[c]
+    if (v === null || v === undefined) return '<td class="null">NULL</td>'
+    if (typeof v === 'number') return `<td class="num">${v.toLocaleString()}</td>`
+    return `<td>${esc(v)}</td>`
+  }).join('') + '</tr>').join('')
+  box.innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`
+  document.getElementById('meta').textContent = metaText || `共 ${rows.length} 行`
+}
+
+async function loadTables() {
+  const aside = document.getElementById('tables')
+  const res = await api('/api/tables')
+  if (!res.ok) {
+    document.getElementById('conn').textContent = '连接失败'
+    aside.innerHTML = `<div class="msg err">${esc(res.error)}</div>`
+    return
+  }
+  document.getElementById('conn').textContent = 'SQL Server · DSH · 已连接'
+  aside.innerHTML = '<div class="grp">表</div>' + res.rows
+    .map(t => `<div class="item ${state.table === t.table ? 'active' : ''}"
+        onclick="pick('${esc(t.schema)}.${esc(t.table)}', this)">
+        <span>${esc(t.schema)}.${esc(t.table)}</span><span class="n">${t.rows ?? 0}</span></div>`)
+    .join('')
+  if (!state.table && res.rows.length) pick(`${res.rows[0].schema}.${res.rows[0].table}`)
+}
+
+function pick(name, el) {
+  state.table = name
+  document.getElementById('curTable').textContent = name
+  document.querySelectorAll('#tables .item').forEach(e => e.classList.remove('active'))
+  if (el) el.classList.add('active')
+  switchTab(state.tab === 'sql' ? 'data' : state.tab)
+}
+
+function switchTab(tab) {
+  state.tab = tab
+  document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab))
+  document.getElementById('sqlBar').style.display = tab === 'sql' ? 'flex' : 'none'
+  if (tab === 'sql') {
+    document.getElementById('box').innerHTML =
+      '<div class="msg info">输入 SELECT 语句后点「执行」。仅放行单条 SELECT / WITH，写操作会被拦截。</div>'
+    document.getElementById('meta').textContent = ''
+    return
+  }
+  loadCurrent()
+}
+
+async function loadCurrent() {
+  if (!state.table) return
+  if (state.tab === 'schema') {
+    const res = await api('/api/columns?table=' + encodeURIComponent(state.table))
+    if (!res.ok) return render(null, res.error)
+    render(res.rows, `${state.table} · ${res.rows.length} 列`)
+  } else {
+    const res = await api('/api/rows?table=' + encodeURIComponent(state.table))
+    if (!res.ok) return render(null, res.error)
+    render(res.rows, `${state.table} · ${res.rows.length} 行`)
+  }
+}
+
+async function runSql() {
+  const sql = document.getElementById('sql').value
+  const res = await api('/api/query', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sql }),
+  })
+  if (!res.ok) {
+    document.getElementById('box').innerHTML = `<div class="msg err">${esc(res.error)}</div>`
+    document.getElementById('meta').textContent = ''
+    return
+  }
+  render(res.rows, `返回 ${res.rows.length} 行`)
+}
+
+// 加一个 SQL 页签（初始隐藏于 tabs 之外，通过点击标题栏 SQL 触发）
+document.querySelector('.tabs').insertAdjacentHTML('beforeend',
+  '<button data-tab="sql" onclick="switchTab(\'sql\')">SQL 查询</button>')
+
+loadTables()
+</script>
+</body>
+</html>

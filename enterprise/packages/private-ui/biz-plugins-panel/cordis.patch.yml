@@ -1,0 +1,7 @@
+# biz-plugins-panel Bundle 的 patch 层：在 base + web-app 两个 bundle 层之后插入本 Bundle 自身的插件行。
+# Loader 据此把 @my-company/biz-plugins-panel 作为 Cordis 插件加载；其 node 半 apply() 为空，
+# 真正的 UI 半（./client）由 ClientModuleRegistry 扫描 dsh.client 后编入浏览器端图。
+# 一条 insert 即可叠加这个「设置-插件」折页面板；后续同类面板照此追加。
+- insert:
+  - id: biz-plugins-panel
+    name: '@my-company/biz-plugins-panel'

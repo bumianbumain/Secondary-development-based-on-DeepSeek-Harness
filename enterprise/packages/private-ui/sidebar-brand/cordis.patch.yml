@@ -1,0 +1,6 @@
+# sidebar-brand Bundle 的 patch 层：把本 Bundle 作为一行 Cordis 插件插入插件树。
+# node 半 apply() 为空；UI 半（./client）注册到侧边栏品牌槽（sidebar.brand.mark /
+# sidebar.brand.name），Loader 依据 dsh.client 把浏览器半编入前端模块表。
+- insert:
+  - id: sidebar-brand
+    name: '@my-company/sidebar-brand'

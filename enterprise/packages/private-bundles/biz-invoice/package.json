@@ -21,8 +21,12 @@
     "@deepseek-ai/cordis": "workspace:^",
     "@deepseek-ai/dsh-tools": "workspace:^"
   },
+  "dependencies": {
+    "mssql": "^11.0.0"
+  },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-tools": "workspace:^"
+    "@deepseek-ai/dsh-tools": "workspace:^",
+    "@types/mssql": "^12.3.0"
   }
 }

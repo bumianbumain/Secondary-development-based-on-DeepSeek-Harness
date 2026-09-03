@@ -21,9 +21,23 @@ export interface UserFilter {
   keyword?: string
 }
 
+/** 创建用户的入参：ID 与状态可省略（分别自动编号、默认 active），roles 省略则给最小权限 viewer。 */
+export interface CreateUserInput {
+  /** 用户 ID；省略则由数据源按规则自动生成（如 U-xxx）。 */
+  id?: string
+  name: string
+  email: string
+  /** 角色；省略则默认 ['viewer']（最小权限）。 */
+  roles?: UserRole[]
+  /** 状态；省略则默认 'active'。 */
+  status?: 'active' | 'disabled'
+}
+
 /** 数据源契约：所有用户访问都经由该接口，便于 mock ↔ 真实实现切换。 */
 export interface UserDataSource {
   listUsers(tenant: string, filter?: UserFilter, limit?: number): Promise<UserProfile[]>
   getUser(tenant: string, userId: string): Promise<UserProfile | null>
   listRoles(): readonly UserRole[]
+  /** 在指定租户下创建用户；ID 重复时抛出错误（由调用方转成友好提示）。 */
+  createUser(tenant: string, input: CreateUserInput): Promise<UserProfile>
 }

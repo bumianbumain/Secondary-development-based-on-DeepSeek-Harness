@@ -1,0 +1,12 @@
+# dev —— 本机开发环境差异层（叠加在 common.cordis.yml 之上）。
+# 端口 3080；与看板(3099)、staging(3081)、prod(3082) 可并存。
+- id: webserver
+  config:
+    host: 127.0.0.1
+    port: 3080
+
+# dev 打开 system-prompt-hook 调试：每次系统提示词组装时在服务日志
+# 打印 section 清单，便于观察 enterprise:policy 覆盖是否在场。
+- id: system-prompt-hook
+  config:
+    debug: true

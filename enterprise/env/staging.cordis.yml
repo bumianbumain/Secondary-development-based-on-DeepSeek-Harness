@@ -1,0 +1,11 @@
+# staging —— 预发/演示环境差异层（叠加在 common.cordis.yml 之上）。
+# 端口 3081：可与 dev(3080) 同时启动，验证「同一份代码、不同配置/库」的多实例并存。
+- id: webserver
+  config:
+    host: 127.0.0.1
+    port: 3081
+
+# 预发保留 debug，便于联调观察；切 prod 前关掉
+- id: system-prompt-hook
+  config:
+    debug: true

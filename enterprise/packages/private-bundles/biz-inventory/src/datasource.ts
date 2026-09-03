@@ -9,6 +9,7 @@
  */
 
 import type { InventoryDataSource, InventoryFilter, InventoryItem, StockStatus } from './types'
+import { SqlServerInventoryDataSource } from './datasource.mssql.js'
 
 const ALL_STATUSES: StockStatus[] = ['in_stock', 'low_stock', 'out_of_stock', 'reserved']
 
@@ -42,7 +43,7 @@ class MockInventoryDataSource implements InventoryDataSource {
     return (MOCK_DB[tenant] ?? []).find(i => i.sku === sku || i.id === sku) ?? null
   }
 
-  listWarehouses(tenant: string): readonly string[] {
+  async listWarehouses(tenant: string): Promise<readonly string[]> {
     const set = new Set((MOCK_DB[tenant] ?? []).map(i => i.warehouse))
     return Array.from(set)
   }
@@ -57,12 +58,12 @@ let instance: InventoryDataSource | null = null
 /**
  * 数据源工厂（扩展点）。
  * 通过环境变量 INVENTORY_DATASOURCE 选择实现；未配置时回退到 mock。
- * 未来接入真实 WMS/ERP 时只改这里，业务工具代码不动。
+ * 真实接入 WMS/ERP 时只改这里，业务工具代码不动。
  */
 export function getInventoryDataSource(): InventoryDataSource {
   if (instance) return instance
-  // 预留：const kind = process.env.INVENTORY_DATASOURCE
-  // if (kind === 'rest') instance = new RestInventoryDataSource(...)
-  instance = new MockInventoryDataSource()
+  const kind = process.env.INVENTORY_DATASOURCE
+  if (kind === 'mssql') instance = new SqlServerInventoryDataSource()
+  else instance = new MockInventoryDataSource()
   return instance
 }

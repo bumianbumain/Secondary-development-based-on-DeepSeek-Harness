@@ -16,8 +16,13 @@ import type { KnowledgeCategory } from './types'
 export const name = 'biz-knowledge'
 export const inject = ['tools']
 
+/**
+ * 从执行上下文解析租户标识。
+ * 有会话时严格按会话隔离；无会话（如 CLI 冒烟测试）回退 'demo' 以打通测试链路。
+ * KNOWLEDGE_TENANT 为演示开关：设置后把所有会话固定到指定租户，便于在 UI 里看到种子数据。
+ */
 function resolveTenant(exec: ToolRunContext): string {
-  return exec.agent?.session?.id ?? 'demo'
+  return process.env.KNOWLEDGE_TENANT || exec.agent?.session?.id || 'demo'
 }
 
 export function apply(ctx: Context): void {
@@ -98,7 +103,7 @@ export function apply(ctx: Context): void {
     },
     async execute(_args, exec: ToolRunContext) {
       const tenant = resolveTenant(exec)
-      return { tenant, tags: ds.listTags(tenant) } as any
+      return { tenant, tags: await ds.listTags(tenant) } as any
     },
   }))
 }

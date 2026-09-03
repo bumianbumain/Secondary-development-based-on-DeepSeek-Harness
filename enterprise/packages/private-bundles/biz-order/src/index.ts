@@ -17,6 +17,8 @@ import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 import { getOrderDataSource } from './datasource.js'
 import type { OrderStatus } from './types'
 
+const STATUS_VALUES: OrderStatus[] = ['pending', 'paid', 'shipped', 'completed', 'cancelled']
+
 /** 稳定 Cordis 插件名，须与 cordis.patch.yml 中插入行的 `name` 一致。 */
 export const name = 'biz-order'
 
@@ -25,9 +27,16 @@ export const inject = ['tools']
 
 /**
  * 从执行上下文解析租户标识。
- * 有会话时严格按会话隔离；无会话（如 CLI 冒烟测试）回退 'demo' 以打通测试链路。
+ *
+ * 默认严格按会话隔离（`exec.agent.session.id`）；无会话（如 CLI 冒烟测试）回退 'demo'。
+ *
+ * 演示模式：设置环境变量 ORDER_TENANT 可把所有会话固定到同一个租户（如 ORDER_TENANT=demo），
+ * 便于在 UI 里直接看到库中的种子数据。生产/多租户演示时**不要设置**该变量，
+ * 查询本身始终按 tenant 过滤，隔离语义不受影响。
  */
 function resolveTenant(exec: ToolRunContext): string {
+  const forced = process.env.ORDER_TENANT
+  if (forced && forced.trim()) return forced.trim()
   return exec.agent?.session?.id ?? 'demo'
 }
 
@@ -114,6 +123,52 @@ export function apply(ctx: Context): void {
     },
     async execute(_args, exec: ToolRunContext) {
       return { tenant: resolveTenant(exec), statuses: ds.listStatuses() } as any
+    },
+  }))
+
+  // —— 工具 4：创建订单（写入闭环：工具 → 数据源 → 数据库） ——
+  ctx.tools.register(defineTool({
+    name: 'create_order',
+    description:
+      '在当前租户/会话下新建一笔订单并落库。当用户表达要下单、创建订单、录入新订单时使用。'
+      + '单号可省略（自动生成），状态默认 pending。写入后可用 query_user_orders 复查。',
+    parameters: {
+      title: {
+        type: 'string',
+        description: '订单标题/名称，必填。',
+      },
+      amount: {
+        type: 'number',
+        description: '订单金额，必填，非负数。',
+      },
+      status: {
+        type: 'string',
+        enum: STATUS_VALUES,
+        description: '初始状态；省略则为 pending。',
+      },
+      order_id: {
+        type: 'string',
+        description: '指定的订单单号；省略则自动生成。若与已有单号重复会报错。',
+      },
+    },
+    output: {
+      schema: { type: 'json' },
+      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+    },
+    async execute(args, exec: ToolRunContext) {
+      const tenant = resolveTenant(exec)
+      try {
+        const order = await ds.createOrder(tenant, {
+          id: args.order_id,
+          title: String(args.title ?? ''),
+          amount: Number(args.amount),
+          status: args.status as OrderStatus | undefined,
+        })
+        return { ok: true, tenant, order } as any
+      } catch (e) {
+        // 校验/落库失败都以结构化错误返回，避免把异常抛给模型导致链路中断
+        return { ok: false, tenant, error: (e as Error).message } as any
+      }
     },
   }))
 }

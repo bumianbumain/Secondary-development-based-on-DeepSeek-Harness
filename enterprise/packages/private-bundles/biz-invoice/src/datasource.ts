@@ -9,6 +9,7 @@
  */
 
 import type { Invoice, InvoiceDataSource, InvoiceFilter, InvoiceStatus } from './types'
+import { SqlServerInvoiceDataSource } from './datasource.mssql.js'
 
 const ALL_STATUSES: InvoiceStatus[] = ['issued', 'sent', 'paid', 'overdue', 'cancelled']
 
@@ -55,8 +56,9 @@ let instance: InvoiceDataSource | null = null
  */
 export function getInvoiceDataSource(): InvoiceDataSource {
   if (instance) return instance
-  // 预留：const kind = process.env.INVOICE_DATASOURCE
-  // if (kind === 'rest') instance = new RestInvoiceDataSource(...)
-  instance = new MockInvoiceDataSource()
+  // 真实接入时按环境变量选择实现，业务工具代码不动
+  const kind = process.env.INVOICE_DATASOURCE
+  if (kind === 'mssql') instance = new SqlServerInvoiceDataSource()
+  else instance = new MockInvoiceDataSource()
   return instance
 }

@@ -22,9 +22,21 @@ export interface OrderFilter {
   keyword?: string
 }
 
+/** 创建订单的入参：单号与状态可省略（分别自动编号、默认 pending）。 */
+export interface CreateOrderInput {
+  /** 业务单号；省略则由数据源按规则自动生成。 */
+  id?: string
+  title: string
+  status?: OrderStatus
+  /** 金额，单位与 Order.amount 一致。 */
+  amount: number
+}
+
 /** 数据源契约：所有订单访问都经由该接口，便于 mock ↔ 真实实现切换。 */
 export interface OrderDataSource {
   listOrders(tenant: string, filter?: OrderFilter, limit?: number): Promise<Order[]>
   getOrder(tenant: string, orderId: string): Promise<Order | null>
   listStatuses(): readonly OrderStatus[]
+  /** 在指定租户下创建订单；单号重复时抛出错误（由调用方转成友好提示）。 */
+  createOrder(tenant: string, input: CreateOrderInput): Promise<Order>
 }

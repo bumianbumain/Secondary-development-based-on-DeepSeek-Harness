@@ -27,6 +27,7 @@ export interface InventoryFilter {
 export interface InventoryDataSource {
   listItems(tenant: string, filter?: InventoryFilter, limit?: number): Promise<InventoryItem[]>
   getItem(tenant: string, sku: string): Promise<InventoryItem | null>
-  listWarehouses(tenant: string): readonly string[]
+  /** 列出当前租户下出现过的全部仓库名（去重）。 */
+  listWarehouses(tenant: string): Promise<readonly string[]>
   listStatuses(): readonly StockStatus[]
 }

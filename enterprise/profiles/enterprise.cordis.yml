@@ -1,5 +1,8 @@
-# 企业主 Profile —— 在 web profile（dsh-base + dsh-web-app）之上叠加私有层。
-# 用法：dsh web --patch enterprise/profiles/enterprise.cordis.yml
+# 【已归档】早期部署 overlay 样例 —— 已被 enterprise/env/ 多环境层取代。
+# 多环境配置请改用:  bash enterprise/run-web-env.sh <dev|staging|prod> [--dump|--bg]
+#   env/common.cordis.yml（公共层） + env/<env>.cordis.yml（环境差异层） + env/<env>.env（变量）
+# 本文件保留仅供参考（等价内容已拆分迁移到 env/ 下）。
+# 用法（旧）: dsh web --patch enterprise/profiles/enterprise.cordis.yml
 # 本文件是 PATCH OVERLAY，不是完整插件树；`- id:` 覆盖某行 config，`- insert:` 追加插件。
 
 # 把私有业务 Bundle 插入插件树
@@ -19,3 +22,10 @@
     persona: >-
       你是企业 AI 助手，遵循内部合规与多租户隔离规范。涉及用户数据时必须
       通过会话上下文获取身份，禁止假设或硬编码。
+
+# 第3层行为覆盖：system-prompt-hook 的部署调参（插件行由 Bundle 自带 cordis.patch.yml 插入）。
+# persona 讲「身份叙事」，本覆盖层立「行为规则」——多租户隔离 + 强制工具优先，
+# 以 enterprise:policy 段钉在 persona 之后；debug 打开便于在服务日志观察覆盖是否在场。
+- id: system-prompt-hook
+  config:
+    debug: true

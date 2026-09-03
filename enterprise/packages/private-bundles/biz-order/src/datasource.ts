@@ -11,7 +11,8 @@
  * 这样 biz-order 的其余业务工具代码无需改动即可切换到真实中台。
  */
 
-import type { Order, OrderDataSource, OrderFilter, OrderStatus } from './types'
+import type { CreateOrderInput, Order, OrderDataSource, OrderFilter, OrderStatus } from './types'
+import { SqlServerOrderDataSource } from './datasource.mssql.js'
 
 const ALL_STATUSES: OrderStatus[] = ['pending', 'paid', 'shipped', 'completed', 'cancelled']
 
@@ -41,6 +42,30 @@ class MockOrderDataSource implements OrderDataSource {
     return (MOCK_DB[tenant] ?? []).find(o => o.id === orderId) ?? null
   }
 
+  async createOrder(tenant: string, input: CreateOrderInput): Promise<Order> {
+    const title = String(input.title ?? '').trim()
+    if (!title) throw new Error('订单标题不能为空')
+    const amount = Number(input.amount)
+    if (!Number.isFinite(amount) || amount < 0) throw new Error('订单金额必须是非负数')
+    const status = input.status ?? 'pending'
+    if (!ALL_STATUSES.includes(status)) throw new Error(`不支持的订单状态：${status}`)
+
+    const bucket = (MOCK_DB[tenant] ??= [])
+    const id = input.id?.trim() || `SO-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
+    if (bucket.some(o => o.id === id)) throw new Error(`订单号 ${id} 已存在，请换一个`)
+
+    const order: Order = {
+      id,
+      title,
+      status,
+      amount,
+      createdAt: new Date().toISOString().slice(0, 10),
+      tenant,
+    }
+    bucket.push(order)
+    return order
+  }
+
   listStatuses(): readonly OrderStatus[] {
     return ALL_STATUSES
   }
@@ -55,8 +80,14 @@ let instance: OrderDataSource | null = null
  */
 export function getOrderDataSource(): OrderDataSource {
   if (instance) return instance
-  // 预留：const kind = process.env.ORDER_DATASOURCE
-  // if (kind === 'rest') instance = new RestOrderDataSource(...)
+  const kind = process.env.ORDER_DATASOURCE
+  if (kind === 'mssql') {
+    const conn = process.env.ORDER_DB_MSSQL
+    if (!conn) throw new Error('ORDER_DATASOURCE=mssql 但未设置 ORDER_DB_MSSQL 连接串')
+    instance = new SqlServerOrderDataSource(conn)
+    return instance
+  }
+  // 预留：if (kind === 'rest') instance = new RestOrderDataSource(...)
   instance = new MockOrderDataSource()
   return instance
 }

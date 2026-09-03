@@ -1,0 +1,7 @@
+# system-prompt-hook Bundle 的 patch 层：把本 Bundle 作为一行 Cordis 插件插入插件树。
+# apply() 在加载时向 systemPrompt 注册 enterprise:policy 覆盖段，并挂 system-prompt/assemble
+# 收尾钩子。部署方如需调参（text/position/enforceTools/guard/debug），在部署 overlay
+# （如 enterprise.cordis.yml）里用 `- id: system-prompt-hook` + config 覆盖，勿改本文件。
+- insert:
+  - id: system-prompt-hook
+    name: '@my-company/system-prompt-hook'

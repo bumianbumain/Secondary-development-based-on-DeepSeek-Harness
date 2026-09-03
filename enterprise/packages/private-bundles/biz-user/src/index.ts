@@ -14,7 +14,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 import { getUserDataSource } from './datasource.js'
-import type { UserRole } from './types'
+import type { UserProfile, UserRole } from './types'
 
 /** 稳定 Cordis 插件名，须与 cordis.patch.yml 中插入行的 `name` 一致。 */
 export const name = 'biz-user'
@@ -25,8 +25,11 @@ export const inject = ['tools']
 /**
  * 从执行上下文解析租户标识。
  * 有会话时严格按会话隔离；无会话（如 CLI 冒烟测试）回退 'demo' 以打通测试链路。
+ * 设 USER_TENANT 可强制指定租户作为演示开关（查询仍始终带 tenant 过滤，隔离语义不变）。
  */
 function resolveTenant(exec: ToolRunContext): string {
+  const forced = process.env.USER_TENANT
+  if (forced) return forced
   return exec.agent?.session?.id ?? 'demo'
 }
 
@@ -88,6 +91,58 @@ export function apply(ctx: Context): void {
     },
     async execute(_args, exec: ToolRunContext) {
       return { tenant: resolveTenant(exec), roles: ds.listRoles() } as any
+    },
+  }))
+
+  // —— 工具 3：创建用户（写入闭环：工具 → 数据源 → 数据库） ——
+  ctx.tools.register(defineTool({
+    name: 'create_user',
+    description:
+      '在当前租户/会话下新建一个用户档案并落库。当用户表达要新增成员、录入新用户、添加账号时使用。'
+      + '需提供姓名与邮箱；角色默认 viewer（最小权限），状态默认 active。'
+      + '写入后可用 query_user_profile 复查。',
+    parameters: {
+      name: {
+        type: 'string',
+        description: '用户姓名，必填。',
+      },
+      email: {
+        type: 'string',
+        description: '用户邮箱，必填，格式需合法。',
+      },
+      roles: {
+        type: 'array',
+        description: '角色列表；省略则默认 [' + "'viewer'" + ']（最小权限）。',
+      },
+      status: {
+        type: 'string',
+        enum: ['active', 'disabled'],
+        description: '账号状态；省略则为 active。',
+      },
+      user_id: {
+        type: 'string',
+        description: '指定的用户 ID；省略则按 U-<序号> 自动生成。若与已有 ID 重复会报错。',
+      },
+    },
+    output: {
+      schema: { type: 'json' },
+      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+    },
+    async execute(args, exec: ToolRunContext) {
+      const tenant = resolveTenant(exec)
+      try {
+        const user = await ds.createUser(tenant, {
+          id: args.user_id,
+          name: String(args.name ?? ''),
+          email: String(args.email ?? ''),
+          roles: Array.isArray(args.roles) ? args.roles as UserRole[] : undefined,
+          status: args.status as UserProfile['status'] | undefined,
+        })
+        return { ok: true, tenant, user } as any
+      } catch (e) {
+        // 校验/落库失败都以结构化错误返回，避免把异常抛给模型导致链路中断
+        return { ok: false, tenant, error: (e as Error).message } as any
+      }
     },
   }))
 }

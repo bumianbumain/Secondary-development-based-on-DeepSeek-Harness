@@ -9,6 +9,7 @@
  */
 
 import type { KnowledgeCategory, KnowledgeDataSource, KnowledgeDoc, KnowledgeFilter } from './types'
+import { SqlServerKnowledgeDataSource } from './datasource.mssql.js'
 
 const ALL_CATEGORIES: KnowledgeCategory[] = ['faq', 'sop', 'product', 'troubleshooting']
 
@@ -78,7 +79,7 @@ class MockKnowledgeDataSource implements KnowledgeDataSource {
     return ALL_CATEGORIES
   }
 
-  listTags(tenant: string): readonly string[] {
+  async listTags(tenant: string): Promise<readonly string[]> {
     const set = new Set((MOCK_DB[tenant] ?? []).flatMap(d => d.tags))
     return Array.from(set)
   }
@@ -93,8 +94,9 @@ let instance: KnowledgeDataSource | null = null
  */
 export function getKnowledgeDataSource(): KnowledgeDataSource {
   if (instance) return instance
-  // 预留：const kind = process.env.KNOWLEDGE_DATASOURCE
-  // if (kind === 'rest') instance = new RestKnowledgeDataSource(...)
-  instance = new MockKnowledgeDataSource()
+  // 真实接入时按环境变量选择实现，业务工具代码不动
+  const kind = process.env.KNOWLEDGE_DATASOURCE
+  if (kind === 'mssql') instance = new SqlServerKnowledgeDataSource()
+  else instance = new MockKnowledgeDataSource()
   return instance
 }

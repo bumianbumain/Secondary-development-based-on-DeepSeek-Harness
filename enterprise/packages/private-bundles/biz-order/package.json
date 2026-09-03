@@ -21,6 +21,9 @@
     "cordis.patch.yml"
   ],
   "license": "MIT",
+  "dependencies": {
+    "mssql": "^11.0.0"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
@@ -32,6 +35,7 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/dsh-tools": "workspace:^"
+    "@deepseek-ai/dsh-tools": "workspace:^",
+    "@types/mssql": "^12.3.0"
   }
 }

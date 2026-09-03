@@ -1,0 +1,14 @@
+# prod —— 生产环境差异层（叠加在 common.cordis.yml 之上）。
+# 端口 3082。生产安全基线：
+#   · 监听 127.0.0.1，前置反代/网关（勿直接 0.0.0.0 暴露——dsh web 是本地 RCE 面）；
+#   · hook debug 关闭；
+#   · 建议独立 DSH_HOME（如 /etc/dsh-prod 或专用用户目录），与 dev/staging 的
+#     凭据、settings.yaml、profile 完全隔离（见 run-web-env.sh 头注与 env/README.md）。
+- id: webserver
+  config:
+    host: 127.0.0.1
+    port: 3082
+
+- id: system-prompt-hook
+  config:
+    debug: false
