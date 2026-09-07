@@ -10,12 +10,12 @@ import type {
  * 把下面三个常量换成贵司品牌信息即可（或后续接入 server→client 品牌配置通道），
  * 无需改动注册逻辑与 slot 契约。
  */
-/** 展开态显示的主产品名。 */
-export const ENTERPRISE_PRODUCT_NAME = '智能体中台'
-/** 主名旁的英文小标。 */
-export const ENTERPRISE_PRODUCT_SUB = 'ENTERPRISE AI PLATFORM'
+/** 展开态显示的主产品名（与登录页 /signin 品牌口径保持一致）。 */
+export const ENTERPRISE_PRODUCT_NAME = 'HubPM'
+/** 主名旁的英文小标；留空则不渲染（避免窄侧栏下被截断）。 */
+export const ENTERPRISE_PRODUCT_SUB = ''
 /** 品牌方块（mark）里的首字；留空则只画纯色方块。 */
-export const ENTERPRISE_BRAND_GLYPH = '智'
+export const ENTERPRISE_BRAND_GLYPH = 'H'
 
 /**
  * 企业品牌标：圆角方块 + 品牌首字，占满 shell 传入的 size（展开品牌行与折叠 rail
@@ -91,17 +91,19 @@ export function EnterpriseBrandName(_props: SidebarBrandNameOwnerProps) {
       >
         {ENTERPRISE_PRODUCT_NAME}
       </span>
-      <span
-        style={{
-          fontSize: '9px',
-          fontWeight: 600,
-          lineHeight: '24px',
-          letterSpacing: '0.14em',
-          color: 'var(--dsw-alias-label-tertiary)',
-        }}
-      >
-        {ENTERPRISE_PRODUCT_SUB}
-      </span>
+      {ENTERPRISE_PRODUCT_SUB.length > 0 ? (
+        <span
+          style={{
+            fontSize: '9px',
+            fontWeight: 600,
+            lineHeight: '24px',
+            letterSpacing: '0.14em',
+            color: 'var(--dsw-alias-label-tertiary)',
+          }}
+        >
+          {ENTERPRISE_PRODUCT_SUB}
+        </span>
+      ) : null}
     </span>
   )
 }
