@@ -52,3 +52,7 @@ db-board.log
 **/.explicit-service-*/
 **/.rendered-model-*/
 scripts/staged-lint-probe-*.ts
+
+# —— 本地 smoke / trash 暂存（playwright 截图、edge profile、调试产物）——
+.smoke/
+.trash-smoke/
