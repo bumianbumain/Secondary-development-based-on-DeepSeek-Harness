@@ -13,6 +13,9 @@ const AUTH_RECORD_KEY = credentialKey('client-connection', 'browser-session')
 const DAY_MILLISECONDS = 24 * 60 * 60 * 1000
 const SECRET_BYTES = 32
 const TOKEN_QUERY = 'token'
+
+/** Standalone sign-in page path served by the core when the enterprise mounts its HTML. */
+export const SIGNIN_PATH = '/signin'
 const COOKIE_PREFIX = 'dsh-auth-'
 const COOKIE_PAYLOAD_VERSION = 1
 const STORED_SECRET_VERSION = 1
@@ -29,6 +32,46 @@ interface BrowserCookiePayload {
   readonly authority: string
   readonly issuedAt: number
   readonly expiresAt: number
+  /** Authenticated subject; empty for launch-token sessions (no AuthProvider mounted). */
+  readonly userId: string
+  /** Role claims carried by the session; empty unless an AuthProvider minted it. */
+  readonly roles: string[]
+}
+
+/** Credential pair a login endpoint verifies. */
+export interface AuthCredentials {
+  readonly username: string
+  readonly password: string
+}
+
+/** Authenticated subject and its role claims, returned by a successful login. */
+export interface AuthSession {
+  readonly userId: string
+  readonly roles: string[]
+}
+
+/**
+ * Pluggable credential verifier. The core `BrowserAuth` calls `verify` on a
+ * `/login` POST when one is mounted; a null result means denied. Enterprise
+ * bundles supply the concrete implementation (e.g. against a SQL user store) —
+ * core never depends on one, so the default single-user launch-token model is
+ * untouched when no provider is present.
+ */
+export interface AuthProvider {
+  verify(credentials: AuthCredentials): Promise<AuthSession | null>
+}
+
+/** Minimal structural view of the root context's optional AuthProvider slot. */
+interface AuthProviderHolder {
+  readonly authProvider?: AuthProvider
+  /**
+   * Optional self-contained sign-in page HTML mounted by an enterprise bundle.
+   * When present together with an {@link AuthProvider}, unauthenticated index
+   * requests are redirected server-side to `/signin` instead of serving the
+   * SPA behind the client-side login gate. When absent the gate behavior is
+   * preserved (enterprise bundles that predate the standalone page).
+   */
+  readonly signinPageHtml?: string
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -155,7 +198,20 @@ function decodeCookie(value: string, secret: Buffer): BrowserCookiePayload | und
     || typeof decoded.authority !== 'string'
     || !Number.isSafeInteger(decoded.issuedAt)
     || !Number.isSafeInteger(decoded.expiresAt)) return undefined
-  return decoded as unknown as BrowserCookiePayload
+  // userId/roles are absent on cookies minted before the AuthProvider feature;
+  // normalize so legacy launch-token sessions read as an empty subject.
+  const userId = typeof decoded.userId === 'string' ? decoded.userId : ''
+  const roles = Array.isArray(decoded.roles)
+    ? decoded.roles.filter((role: unknown): role is string => typeof role === 'string')
+    : []
+  return {
+    version: COOKIE_PAYLOAD_VERSION,
+    authority: decoded.authority as string,
+    issuedAt: decoded.issuedAt as number,
+    expiresAt: decoded.expiresAt as number,
+    userId,
+    roles,
+  }
 }
 
 async function initializeSecret(credentials: CredentialProvider): Promise<Buffer> {
@@ -185,6 +241,15 @@ async function initializeSecret(credentials: CredentialProvider): Promise<Buffer
 export class BrowserAuth {
   private readonly launchToken: string
   private readonly maxAgeMilliseconds: number
+  /**
+   * The root application context, retained so the mounted enterprise
+   * `AuthProvider` (an optional context service) can be resolved lazily at
+   * request time. Resolving lazily — rather than capturing the provider at
+   * construction — is required because the enterprise bundle that provides it
+   * applies after this core plugin and in a sibling plugin branch, so the
+   * value is only visible on the root context once the full tree has loaded.
+   */
+  private readonly rootContext: object
 
   private constructor(
     processOwner: object,
@@ -193,10 +258,29 @@ export class BrowserAuth {
   ) {
     this.launchToken = processLaunchToken(processOwner)
     this.maxAgeMilliseconds = maxAgeDays * DAY_MILLISECONDS
+    this.rootContext = processOwner
     if (!Number.isSafeInteger(this.maxAgeMilliseconds)
       || !Number.isSafeInteger(Date.now() + this.maxAgeMilliseconds)) {
       throw new Error('client-connection: cookieMaxAgeDays exceeds the safe timestamp range')
     }
+  }
+
+  /**
+   * Resolve the enterprise AuthProvider lazily from the root context. Returns
+   * undefined when no enterprise bundle has mounted one, preserving the legacy
+   * single-user launch-token model.
+   */
+  private get provider(): AuthProvider | undefined {
+    return (this.rootContext as AuthProviderHolder).authProvider
+  }
+
+  /**
+   * Resolve the enterprise sign-in page HTML lazily from the root context.
+   * Undefined when no enterprise bundle has mounted one; the client-side
+   * login gate inside the SPA then remains the login surface.
+   */
+  private get signinHtml(): string | undefined {
+    return (this.rootContext as AuthProviderHolder).signinPageHtml
   }
 
   /**
@@ -252,6 +336,8 @@ export class BrowserAuth {
           authority,
           issuedAt,
           expiresAt,
+          userId: '',
+          roles: [],
         }, this.secret)
         res.writeHead(303, {
           'cache-control': 'no-store',
@@ -277,6 +363,23 @@ export class BrowserAuth {
       return false
     }
     if (this.isAuthenticated(req)) return true
+    // When an enterprise sign-in page is mounted, unauthenticated index
+    // requests are redirected to it server-side — the SPA is never served to
+    // an anonymous visitor. Without the page (or without any provider) the
+    // earlier behaviors hold: the SPA login gate renders inside the app, or
+    // the legacy single-user launch-token model rejects with 401.
+    if (this.provider !== undefined) {
+      if (typeof this.signinHtml === 'string' && this.signinHtml.length > 0) {
+        res.writeHead(302, {
+          'cache-control': 'no-store',
+          'location': SIGNIN_PATH,
+          'referrer-policy': 'no-referrer',
+        })
+        res.end()
+        return false
+      }
+      return true
+    }
     this.writeUnauthorized(req, res)
     return false
   }
@@ -287,18 +390,95 @@ export class BrowserAuth {
    * @returns true only for an unexpired cookie signed by this activation's loaded secret.
    */
   isAuthenticated(request: ConnectionTrustRequest): boolean {
+    return this.validPayload(request) !== undefined
+  }
+
+  /** Whether an enterprise AuthProvider is mounted (login flow active). */
+  get authEnabled(): boolean {
+    return this.provider !== undefined
+  }
+
+  /**
+   * The enterprise sign-in page HTML, when mounted. The core serves it at
+   * {@link SIGNIN_PATH}; undefined keeps the SPA login-gate behavior.
+   */
+  get signinPage(): string | undefined {
+    return this.signinHtml
+  }
+
+  /** Decode + validate the authority-bound cookie (shared by isAuthenticated and sessionIdentity). */
+  private validPayload(request: ConnectionTrustRequest): BrowserCookiePayload | undefined {
     const authority = requestAuthority(request.headers)
     const rawCookie = header(request.headers, 'cookie')
-    if (authority === undefined || rawCookie === undefined) return false
+    if (authority === undefined || rawCookie === undefined) return undefined
     const value = cookieValue(rawCookie, cookieName(authority))
-    if (value === undefined) return false
+    if (value === undefined) return undefined
     const payload = decodeCookie(value, this.secret)
-    if (payload === undefined || payload.authority !== authority) return false
+    if (payload === undefined || payload.authority !== authority) return undefined
     const now = Date.now()
-    return payload.issuedAt <= now
+    if (!(payload.issuedAt <= now
       && payload.expiresAt > now
       && payload.expiresAt > payload.issuedAt
-      && payload.expiresAt - payload.issuedAt <= this.maxAgeMilliseconds
+      && payload.expiresAt - payload.issuedAt <= this.maxAgeMilliseconds)) return undefined
+    return payload
+  }
+
+  /**
+   * Verify credentials through the mounted {@link AuthProvider} and mint a
+   * signed browser-session cookie carrying the subject and roles. Returns null
+   * when no provider is mounted or the credentials are rejected.
+   * @param credentials - the login pair from the `/login` POST body.
+   * @param request - the login request (its Host header binds the cookie name).
+   * @returns the set-cookie header value and the session, or null when denied.
+   */
+  async login(
+    credentials: AuthCredentials,
+    request: ConnectionTrustRequest,
+  ): Promise<{ cookie: string; session: AuthSession } | null> {
+    const provider = this.provider
+    if (provider === undefined) return null
+    const authority = requestAuthority(request.headers)
+    if (authority === undefined) return null
+    const session = await provider.verify(credentials)
+    if (session === null) return null
+    const issuedAt = Date.now()
+    const expiresAt = issuedAt + this.maxAgeMilliseconds
+    const value = encodeCookie({
+      version: COOKIE_PAYLOAD_VERSION,
+      authority,
+      issuedAt,
+      expiresAt,
+      userId: session.userId,
+      roles: session.roles,
+    }, this.secret)
+    return {
+      cookie: sessionCookie(
+        cookieName(authority), value, expiresAt, Math.floor(this.maxAgeMilliseconds / 1000),
+      ),
+      session,
+    }
+  }
+
+  /**
+   * Resolve the authenticated subject and roles from a valid browser cookie.
+   * @param request - request headers carrying Host and Cookie.
+   * @returns the session, or undefined when the cookie is absent or invalid.
+   */
+  sessionIdentity(request: ConnectionTrustRequest): AuthSession | undefined {
+    const payload = this.validPayload(request)
+    if (payload === undefined) return undefined
+    return { userId: payload.userId, roles: payload.roles }
+  }
+
+  /**
+   * Build a session-cookie clearing header for the request's authority.
+   * @param request - request headers carrying Host.
+   * @returns the set-cookie value, or undefined without an authority.
+   */
+  signout(request: ConnectionTrustRequest): string | undefined {
+    const authority = requestAuthority(request.headers)
+    if (authority === undefined) return undefined
+    return `${cookieName(authority)}=; Max-Age=0; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Strict`
   }
 
   private writeUnauthorized(req: ConnectionIndexRequest, res: ConnectionIndexResponse): void {

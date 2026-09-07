@@ -11,7 +11,7 @@ import { clientRequestSchema } from './rpc-schema.ts'
 import { bridge, type FetchHandler } from './http-bridge.ts'
 import { isTrustedApiRequest } from './api-request-trust.ts'
 import { API_PATH } from './api-path.ts'
-import type { BrowserAuth } from './browser-auth.ts'
+import type { AuthCredentials, AuthProvider, AuthSession, BrowserAuth } from './browser-auth.ts'
 import type {
   ConnectionIndexRequest,
   ConnectionIndexResponse,
@@ -52,6 +52,18 @@ declare module '@deepseek-ai/cordis' {
   interface Context {
     /** Host Connection transport and RPC registrations. */
     connection: HostConnectionHandle
+    /**
+     * Optional credential verifier mounted by an enterprise bundle. When
+     * present, `BrowserAuth` serves the SPA to unauthenticated index requests
+     * and answers `/login`; absent, the legacy launch-token model holds.
+     */
+    authProvider?: AuthProvider
+    /**
+     * Optional self-contained sign-in page HTML mounted by an enterprise
+     * bundle. When present with an AuthProvider, unauthenticated index
+     * requests are redirected server-side to `/signin`.
+     */
+    signinPageHtml?: string
   }
 }
 
@@ -101,6 +113,34 @@ export class HostConnectionService extends Service implements HostConnectionHand
   /** Authenticate an index request through the process-token exchange or cookie. */
   authorizeIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): boolean {
     return this.browserAuth.authorizeIndex(request, response)
+  }
+
+  /** Verify credentials and mint a session cookie; null when no provider or denied. */
+  login(
+    credentials: AuthCredentials,
+    request: ConnectionTrustRequest,
+  ): Promise<{ cookie: string; session: AuthSession } | null> {
+    return this.browserAuth.login(credentials, request)
+  }
+
+  /** Resolve the authenticated subject and roles from a valid cookie; undefined when absent. */
+  sessionIdentity(request: ConnectionTrustRequest): AuthSession | undefined {
+    return this.browserAuth.sessionIdentity(request)
+  }
+
+  /** The enterprise sign-in page HTML when mounted; undefined keeps the SPA gate behavior. */
+  get signinPage(): string | undefined {
+    return this.browserAuth.signinPage
+  }
+
+  /** Whether the request carries a valid browser-session cookie. */
+  isAuthenticated(request: ConnectionTrustRequest): boolean {
+    return this.browserAuth.isAuthenticated(request)
+  }
+
+  /** Build the session-cookie clearing header for the request's authority. */
+  signout(request: ConnectionTrustRequest): string | undefined {
+    return this.browserAuth.signout(request)
   }
 
   /** Add this process's launch token to the clean application URL. */

@@ -3,25 +3,41 @@
  *
  * 通过 mssql 驱动连接 SQL Server；连接串从环境变量 USER_DB_MSSQL 注入
  * （由启动进程传入，禁止硬编码凭据）。首次查询时惰性建连并初始化表结构
- * （dbo.biz_users），若 demo 租户为空则写入种子数据，便于直接验证全链路。
+ * （dbo.biz_users），但不写入任何种子数据——数据一律由数据库侧管理。
  *
  * roles 以逗号分隔的 nvarchar 存储（如 'admin,finance'），读取时拆回数组，
- * 与业务模型 UserProfile.roles: UserRole[] 对齐。该实现与 MockUserDataSource
- * 遵循同一个 UserDataSource 契约，业务工具代码无需改动即可切换（工厂见 datasource.ts）。
+ * 与业务模型 UserProfile.roles: UserRole[] 对齐。
  */
 
+import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 import mssql from 'mssql'
-import type { CreateUserInput, UserDataSource, UserFilter, UserProfile, UserRole } from './types'
+import { getSharedPool } from '@my-company/biz-shared'
+import type { AuthResult, CreateUserInput, UpdateUserInput, UserDataSource, UserFilter, UserProfile, UserRole } from './types'
 
 const ALL_ROLES: UserRole[] = ['admin', 'operator', 'viewer', 'finance']
 const ACTIVE_STATUSES: UserProfile['status'][] = ['active', 'disabled']
 
-const DEMO_SEED: UserProfile[] = [
-  { id: 'U-001', name: '张伟', email: 'zhangwei@demo.com', roles: ['admin'], tenant: 'demo', status: 'active' },
-  { id: 'U-002', name: '李娜', email: 'lina@demo.com', roles: ['operator', 'finance'], tenant: 'demo', status: 'active' },
-  { id: 'U-003', name: '王强', email: 'wangqiang@demo.com', roles: ['viewer'], tenant: 'demo', status: 'disabled' },
-  { id: 'U-004', name: '刘洋', email: 'liuyang@demo.com', roles: ['operator'], tenant: 'demo', status: 'active' },
-]
+/**
+ * 密码哈希格式：`scrypt$<saltHex>$<hashHex>`。无外部依赖（用 node:crypto），
+ * 与核心 BrowserAuth 的 HMAC 思路一致——凭证后端自包含、可离线校验。
+ */
+const SECRET_PREFIX = 'scrypt$'
+
+function hashPassword(password: string): string {
+  const salt = randomBytes(16)
+  const hash = scryptSync(password, salt, 64)
+  return `${SECRET_PREFIX}${salt.toString('hex')}$${hash.toString('hex')}`
+}
+
+function verifyPassword(password: string, stored: string): boolean {
+  if (!stored.startsWith(SECRET_PREFIX)) return false
+  const [_, saltHex, hashHex] = stored.split('$')
+  if (!saltHex || !hashHex) return false
+  const salt = Buffer.from(saltHex, 'hex')
+  const expected = Buffer.from(hashHex, 'hex')
+  const actual = scryptSync(password, salt, 64)
+  return actual.byteLength === expected.byteLength && timingSafeEqual(actual, expected)
+}
 
 export class SqlServerUserDataSource implements UserDataSource {
   private pool: mssql.ConnectionPool | null = null
@@ -30,8 +46,7 @@ export class SqlServerUserDataSource implements UserDataSource {
 
   private async getPool(): Promise<mssql.ConnectionPool> {
     if (!this.pool) {
-      this.pool = new mssql.ConnectionPool(this.connString)
-      await this.pool.connect()
+      this.pool = await getSharedPool(this.connString)
       await this.ensureSchema()
     }
     return this.pool
@@ -47,27 +62,15 @@ export class SqlServerUserDataSource implements UserDataSource {
         email   nvarchar(256) NOT NULL,
         roles   nvarchar(256) NOT NULL,
         status  nvarchar(32)  NOT NULL,
-        tenant  nvarchar(128) NOT NULL
+        tenant  nvarchar(128) NOT NULL,
+        secret  nvarchar(255) NULL
       );
     `)
-    const { recordset } = await pool
-      .request()
-      .query("SELECT COUNT(*) AS c FROM dbo.biz_users WHERE tenant = 'demo'")
-    if (Number(recordset[0]?.c ?? 0) === 0) {
-      for (const u of DEMO_SEED) {
-        await pool
-          .request()
-          .input('id', mssql.NVarChar, u.id)
-          .input('name', mssql.NVarChar, u.name)
-          .input('email', mssql.NVarChar, u.email)
-          .input('roles', mssql.NVarChar, u.roles.join(','))
-          .input('status', mssql.NVarChar, u.status)
-          .input('tenant', mssql.NVarChar, u.tenant)
-          .query(
-            'INSERT INTO dbo.biz_users (id, name, email, roles, status, tenant) VALUES (@id, @name, @email, @roles, @status, @tenant)',
-          )
-      }
-    }
+    // 老库兼容：新增实例才建表并带 secret 列；已存在的库按需补列（幂等）。
+    await pool.request().query(`
+      IF COL_LENGTH('dbo.biz_users', 'secret') IS NULL
+      ALTER TABLE dbo.biz_users ADD secret nvarchar(255) NULL;
+    `)
   }
 
   async listUsers(tenant: string, filter?: UserFilter, limit = 10): Promise<UserProfile[]> {
@@ -114,6 +117,16 @@ export class SqlServerUserDataSource implements UserDataSource {
     if (!email) throw new Error('用户邮箱不能为空')
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error(`邮箱格式不正确：${email}`)
 
+    // 幂等性：同租户下邮箱已存在则拒绝重复创建，返回已有 ID 提示（防 agent 重复 create_user 产生重复档案）
+    const dup = await pool
+      .request()
+      .input('email', mssql.NVarChar, email)
+      .input('tenant', mssql.NVarChar, tenant)
+      .query('SELECT id FROM dbo.biz_users WHERE email = @email AND tenant = @tenant')
+    if (dup.recordset.length > 0) {
+      throw new Error(`邮箱 ${email} 已存在（用户 ID ${String(dup.recordset[0].id)}），无需重复创建`)
+    }
+
     const roles = (input.roles ?? ['viewer']).map(r => String(r).trim()).filter(Boolean) as UserRole[]
     if (roles.length === 0) throw new Error('至少需要一个角色')
     for (const r of roles) if (!ALL_ROLES.includes(r)) throw new Error(`不支持的角色：${r}`)
@@ -147,6 +160,68 @@ export class SqlServerUserDataSource implements UserDataSource {
 
   listRoles(): readonly UserRole[] {
     return ALL_ROLES
+  }
+
+  async authenticate(username: string, password: string): Promise<AuthResult | null> {
+    const pool = await this.getPool()
+    const key = String(username ?? '').trim().toLowerCase()
+    if (!key || !password) return null
+    // 登录键：邮箱（精确，已小写）或用户 ID（精确）。跨租户查，登录不需先知道租户。
+    const { recordset } = await pool
+      .request()
+      .input('email', mssql.NVarChar, key)
+      .input('id', mssql.NVarChar, String(username ?? '').trim())
+      .query(
+        'SELECT id, roles, status, secret FROM dbo.biz_users WHERE email = @email OR id = @id',
+      )
+    const row = recordset[0]
+    if (!row) return null
+    if (String(row.status) !== 'active') return null
+    const stored = row.secret == null ? '' : String(row.secret)
+    if (!stored || !verifyPassword(password, stored)) return null
+    return {
+      userId: String(row.id),
+      roles: String(row.roles).split(',').map(s => s.trim()).filter(Boolean) as UserRole[],
+    }
+  }
+
+  async setPassword(tenant: string, userId: string, password: string): Promise<boolean> {
+    const existing = await this.getUser(tenant, userId)
+    if (!existing) return false
+    if (!password || password.length < 6) {
+      throw new Error('密码长度至少 6 位')
+    }
+    const pool = await this.getPool()
+    await pool
+      .request()
+      .input('secret', mssql.NVarChar, hashPassword(password))
+      .input('id', mssql.NVarChar, userId)
+      .input('tenant', mssql.NVarChar, tenant)
+      .query('UPDATE dbo.biz_users SET secret = @secret WHERE id = @id AND tenant = @tenant')
+    return true
+  }
+
+  async updateUser(tenant: string, userId: string, input: UpdateUserInput): Promise<UserProfile | null> {
+    const existing = await this.getUser(tenant, userId)
+    if (!existing) return null
+
+    const roles = input.roles ?? existing.roles
+    if (roles.length === 0) throw new Error('至少需要一个角色')
+    for (const r of roles) if (!ALL_ROLES.includes(r)) throw new Error(`不支持的角色：${r}`)
+
+    const status = input.status ?? existing.status
+    if (!ACTIVE_STATUSES.includes(status)) throw new Error(`不支持的账号状态：${status}`)
+
+    const pool = await this.getPool()
+    await pool
+      .request()
+      .input('roles', mssql.NVarChar, roles.join(','))
+      .input('status', mssql.NVarChar, status)
+      .input('id', mssql.NVarChar, userId)
+      .input('tenant', mssql.NVarChar, tenant)
+      .query('UPDATE dbo.biz_users SET roles = @roles, status = @status WHERE id = @id AND tenant = @tenant')
+
+    return this.getUser(tenant, userId)
   }
 }
 

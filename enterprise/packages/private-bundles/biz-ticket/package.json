@@ -1,0 +1,41 @@
+{
+  "name": "@my-company/biz-ticket",
+  "description": "企业 IT 工单业务 Bundle：在不修改 DSH 核心源码的前提下，向工具注册表注入 query_ticket / create_ticket / update_ticket_status / ticket_stats 工具（多租户隔离 + 状态流转约束）。",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/index.d.ts",
+    "cordis.patch.yml"
+  ],
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-tools": "workspace:^"
+  },
+  "dependencies": {
+    "mssql": "^11.0.0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-tools": "workspace:^",
+    "@types/mssql": "^12.3.0"
+  }
+}

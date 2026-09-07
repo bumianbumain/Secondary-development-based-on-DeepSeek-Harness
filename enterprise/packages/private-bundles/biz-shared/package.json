@@ -1,0 +1,22 @@
+{
+  "name": "@my-company/biz-shared",
+  "description": "企业业务 Bundle 共享内核：多租户解析 + 泛型 MSSQL 租户表基类。单一事实来源，消除 7 个 Bundle 中重复的安全关键逻辑与 MSSQL 样板。",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    }
+  },
+  "license": "MIT",
+  "dependencies": {
+    "mssql": "^11.0.0"
+  },
+  "devDependencies": {
+    "@types/mssql": "^12.3.0"
+  }
+}

@@ -1,0 +1,8 @@
+# auth-login Bundle 的 patch 层：在 biz-user 之后插入本 Bundle 自身的插件行。
+# node 半 apply() 向 ctx.root 挂载 AuthProvider（凭证校验委托 @my-company/biz-user 的
+# SQL 用户表）；核心 BrowserAuth 在 /login 请求时懒读取该 provider，因此本行只需在
+# 首次请求前就位，无严格先后依赖。client 半（./client，见 dsh.client）由模块系统编入
+# 浏览器模块表，负责未登录时的登录闸门 UI。
+- insert:
+  - id: auth-login
+    name: '@my-company/auth-login'

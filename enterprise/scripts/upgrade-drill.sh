@@ -43,6 +43,20 @@ pass() { GATE_PASS=$((GATE_PASS+1)); [[ "$QUIET" != "--quiet" ]] && printf '  \0
 fail() { GATE_FAIL=$((GATE_FAIL+1)); printf '  \033[31mFAIL\033[0m  %s\n' "$1"; }
 trap 'rm -rf "$TMP"' EXIT
 
+# —— 受控核心 seam（路线 A：外圈登录权限页）——
+# 唯一允许触碰的核心源码：packages/client/connection 的三个文件（BrowserAuth 注入
+# AuthProvider + roles Cookie；/login、/api/session/me 路由）。这是经过评审的受控例外，
+# 不是违规：上游发版若触及同名文件会在 merge-tree 阶段被点名（届时按
+# enterprise/doc/LOGIN-PAGE-*.md 的 seam 适配段处置）。其余核心文件仍零改动。
+# 用法: is_seam <path>
+is_seam() {
+  case "$1" in
+    packages/client/connection/src/browser-auth.ts|packages/client/connection/src/index.ts|packages/client/connection/src/rpc-host.ts) return 0 ;;
+  esac
+  return 1
+}
+SEEN_SEAMS=()
+
 # 在 <parent> 之上生成一个仅含“路径→新内容”改动的提交（不落地工作区）。返回新提交 SHA。
 # 用法: mk_commit <parent> <message> <path1> <sha1> [<path2> <sha2> ...]
 mk_commit() {
@@ -80,6 +94,7 @@ COMMITTED_LIST="$(git diff --name-status "$BASE" "$DEV_HEAD")"
 while IFS=$'\t' read -r st path; do
   [[ -z "$path" ]] && continue
   [[ "$path" == enterprise/* ]] && continue
+  is_seam "$path" && { SEEN_SEAMS+=("$path"); continue; }
   [[ "$path" =~ (^|/)(\.vs/|_tmp_|\.dsh-sdk-|\.explicit-service-|\.rendered-model-|\.generated-|staged-lint-probe-) ]] && continue
   [[ "$path" =~ ^(\.gitignore|pnpm-workspace\.yaml|pnpm-lock\.yaml)$ ]] && continue
   [[ "$st" == D* && "$path" == .agents/notes/archived/* ]] && continue
@@ -94,12 +109,17 @@ WORKTREE_LIST="$(git status --porcelain)"
 while read -r st path; do
   [[ -z "$path" ]] && continue
   [[ "$path" == enterprise/* ]] && continue
+  is_seam "$path" && { SEEN_SEAMS+=("$path"); continue; }
   [[ "$path" =~ (^|/)(\.vs/|_tmp_|\.dsh-sdk-|\.explicit-service-|\.rendered-model-|\.generated-|staged-lint-probe-) ]] && continue
   [[ "$path" =~ ^(\.gitignore|pnpm-workspace\.yaml|pnpm-lock\.yaml)$ ]] && continue
   wt_offenders=$((wt_offenders+1))
   fail "工作区核心改动: [$st] $path"
 done <<< "$WORKTREE_LIST"
 [[ $wt_offenders -eq 0 ]] && pass "工作区核心源码零改动（仅 enterprise/ + 根级基础设施）"
+if [[ ${#SEEN_SEAMS[@]} -gt 0 ]]; then
+  pass "受控核心 seam（外圈登录权限，${#SEEN_SEAMS[@]} 处）：$(printf '%s' "${SEEN_SEAMS[*]}")"
+  say "      ↑ 路线 A 的受控例外；上游若触碰同名文件会被阶段[3]/[4]点名，按 LOGIN-PAGE seam 段适配"
+fi
 
 # ------------------------------------------------------------------ 阶段 [2]
 echo
@@ -177,6 +197,10 @@ cat > "$RUNBOOK" <<EOF
 ## 为什么企业层升级几乎零成本
 - 核心源码零改动（双口径预检保证）：已提交域 BASE..HEAD 与未提交工作区中，非 enterprise/
   变更仅限瞬态产物清理、归档文档删除与 \`.gitignore / pnpm-workspace.yaml / pnpm-lock.yaml\`。
+- 受控例外（路线 A 登录 seam）：\`packages/client/connection/src/\` 的 browser-auth.ts /
+  index.ts / rpc-host.ts 三处为核心“能力 seam”（AuthProvider 注入 + /login 路由），
+  经评审允许并会在预检阶段点名公示；上游若与它们冲突，merge-tree 会精确点名，
+  按 enterprise/doc/LOGIN-PAGE-*.md 的 seam 适配段处置即可。
 - 一切核心诉求走叠加层：\`--patch\` overlay / \`cordis.patch.yml\`（Bundle 级与 profile 级）/
   插件 Bundle，从不改核心 → 上游发版永不与企业层冲突。
 - 数据与配置在仓库之外：连接串、租户、端口按环境注入（\`enterprise/env/<env>.env\`），

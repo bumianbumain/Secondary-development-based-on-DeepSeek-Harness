@@ -14,24 +14,17 @@ import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 import { getUserDataSource } from './datasource.js'
+import { resolveTenant } from '@my-company/biz-shared'
 import type { UserProfile, UserRole } from './types'
+
+/** 对外暴露数据源工厂，供 auth-login 等桥接 Bundle 接入凭证后端。 */
+export { getUserDataSource } from './datasource.js'
 
 /** 稳定 Cordis 插件名，须与 cordis.patch.yml 中插入行的 `name` 一致。 */
 export const name = 'biz-user'
 
 /** 仅依赖 tools 服务（dsh-base 已提供）；声明后 `apply` 才能拿到 `ctx.tools`。 */
 export const inject = ['tools']
-
-/**
- * 从执行上下文解析租户标识。
- * 有会话时严格按会话隔离；无会话（如 CLI 冒烟测试）回退 'demo' 以打通测试链路。
- * 设 USER_TENANT 可强制指定租户作为演示开关（查询仍始终带 tenant 过滤，隔离语义不变）。
- */
-function resolveTenant(exec: ToolRunContext): string {
-  const forced = process.env.USER_TENANT
-  if (forced) return forced
-  return exec.agent?.session?.id ?? 'demo'
-}
 
 /** Bundle 插件入口：注册业务工具并登记资源生命周期。 */
 export function apply(ctx: Context): void {
@@ -71,7 +64,7 @@ export function apply(ctx: Context): void {
       render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
     },
     async execute(args, exec: ToolRunContext) {
-      const tenant = resolveTenant(exec)
+      const tenant = resolveTenant(exec, 'USER_TENANT')
       const users = await ds.listUsers(tenant, {
         role: args.role as UserRole | undefined,
         keyword: args.keyword,
@@ -90,7 +83,7 @@ export function apply(ctx: Context): void {
       render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
     },
     async execute(_args, exec: ToolRunContext) {
-      return { tenant: resolveTenant(exec), roles: ds.listRoles() } as any
+      return { tenant: resolveTenant(exec, 'USER_TENANT'), roles: ds.listRoles() } as any
     },
   }))
 
@@ -129,7 +122,7 @@ export function apply(ctx: Context): void {
       render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
     },
     async execute(args, exec: ToolRunContext) {
-      const tenant = resolveTenant(exec)
+      const tenant = resolveTenant(exec, 'USER_TENANT')
       try {
         const user = await ds.createUser(tenant, {
           id: args.user_id,
@@ -142,6 +135,73 @@ export function apply(ctx: Context): void {
       } catch (e) {
         // 校验/落库失败都以结构化错误返回，避免把异常抛给模型导致链路中断
         return { ok: false, tenant, error: (e as Error).message } as any
+      }
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'update_user',
+    description:
+      '更新用户角色/状态（如改角色、禁用/启用账号）。'
+      + '当用户要求「改权限」「调整角色」「禁用/启用某账号」时调用。'
+      + '仅提供要修改的字段，未提供的字段保持不变。用户不存在返回 found:false。',
+    parameters: {
+      user_id: { type: 'string', description: '用户 ID，如 U-002。' },
+      roles: {
+        type: 'array',
+        items: { type: 'string', enum: ['admin', 'operator', 'viewer', 'finance'] },
+        description: '新角色列表（覆盖原角色）；省略则不变。',
+      },
+      status: {
+        type: 'string',
+        enum: ['active', 'disabled'],
+        description: '新状态；省略则不变。',
+      },
+    },
+    output: {
+      schema: { type: 'json' },
+      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+    },
+    async execute(args, exec: ToolRunContext) {
+      const tenant = resolveTenant(exec, 'USER_TENANT')
+      const userId = String(args.user_id ?? '')
+      try {
+        const user = await ds.updateUser(tenant, userId, {
+          roles: Array.isArray(args.roles) ? args.roles as UserRole[] : undefined,
+          status: args.status as UserProfile['status'] | undefined,
+        })
+        if (!user) return { tenant, found: false, user_id: userId } as any
+        return { tenant, found: true, user } as any
+      } catch (e) {
+        return { tenant, found: false, user_id: userId, error: (e as Error).message } as any
+      }
+    },
+  }))
+
+  // —— 工具 5：设置用户登录密码（凭证引导/重置，供「外圈登录页」所用） ——
+  ctx.tools.register(defineTool({
+    name: 'set_user_password',
+    description:
+      '为用户设置登录密码（scrypt 加盐哈希后落库），供「外圈登录权限页」的 /login 凭证校验使用。'
+      + '当用户/运维需要「配置登录密码」「初始化账号凭证」「重置密码」时调用。密码至少 6 位。'
+      + '返回 ok:true 表示设置成功，found:false 表示用户不存在。',
+    parameters: {
+      user_id: { type: 'string', description: '用户 ID，如 U-001。' },
+      password: { type: 'string', description: '新密码，至少 6 位。' },
+    },
+    output: {
+      schema: { type: 'json' },
+      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+    },
+    async execute(args, exec: ToolRunContext) {
+      const tenant = resolveTenant(exec, 'USER_TENANT')
+      const userId = String(args.user_id ?? '')
+      const password = String(args.password ?? '')
+      try {
+        const ok = await ds.setPassword(tenant, userId, password)
+        return { ok, found: ok, tenant, user_id: userId } as any
+      } catch (e) {
+        return { ok: false, tenant, user_id: userId, error: (e as Error).message } as any
       }
     },
   }))

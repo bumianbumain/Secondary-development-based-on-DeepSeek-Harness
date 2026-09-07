@@ -10,3 +10,8 @@
 - id: system-prompt-hook
   config:
     debug: true
+
+# 注意：会话 Cookie 有效期（cookieMaxAgeDays）未在此设置。
+# 它已写入机器级用户层 C:/Users/Administrator/.dsh/cordis.patch.yml
+# （id: connection, cookieMaxAgeDays: 1），由 dsh 启动时自动加载、优先于 profile。
+# 本文件需经 --patch 才生效；当前 start-web-sql.sh 未加载它，故此处不再重复。

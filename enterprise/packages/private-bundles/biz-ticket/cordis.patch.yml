@@ -1,0 +1,6 @@
+# biz-ticket Bundle 的 patch 层：在 base + web-app 之后插入本 Bundle 自身的插件行。
+# Loader 据此把 @my-company/biz-ticket 作为 Cordis 插件加载，其 apply() 中注册 query_ticket 等工具。
+# 注意：这里的 id 必须与 src/index.ts 的 `export const name` 完全一致，否则插件静默不加载。
+- insert:
+  - id: biz-ticket
+    name: '@my-company/biz-ticket'
